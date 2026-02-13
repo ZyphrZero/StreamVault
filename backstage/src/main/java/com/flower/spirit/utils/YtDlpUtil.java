@@ -18,35 +18,19 @@ public class YtDlpUtil {
 
 	private static final Logger logger = LoggerFactory.getLogger(YtDlpUtil.class);
 
-	public static String exec(String url, String outpath, String p,Boolean createnfo) throws IOException, InterruptedException {
+	public static String exec(String url, String outpath, String p, Boolean createnfo)
+			throws IOException, InterruptedException {
+		if (url == null || url.trim().isEmpty()) {
+			throw new IllegalArgumentException("URL不能为空");
+		}
+
 		List<String> command = new ArrayList<>();
 		command.add("yt-dlp");
 		command.add("--print-json");
-		String apppath = Global.apppath;
-		File cookieDir = new File(apppath + "/cookies");
-		if (null!=p && p.equals("youtube")) {
-			File youtubeFile = new File(cookieDir, "youtube.txt");
-			if (youtubeFile.exists()) {
-				command.add("--cookies");
-				command.add(youtubeFile.getAbsolutePath());
-			}
-		}
+		command.add("--progress");
+		command.add("--newline");
 
-		if (null!=p && p.equals("twitter")) {
-			File twitterFile = new File(cookieDir, "twitter.txt");
-			if (twitterFile.exists()) {
-				command.add("--cookies");
-				command.add(twitterFile.getAbsolutePath());
-			}
-		}
-		
-		if(null!=p && !p.equals("twitter") && !p.equals("youtube")) {
-			File all = new File(cookieDir, p+".txt");
-			if (all.exists()) {
-				command.add("--cookies");
-				command.add(all.getAbsolutePath());
-			}
-		}
+		addCookieConfig(command, p);
 
 		if (Global.proxyinfo != null && !Global.proxyinfo.trim().isEmpty()) {
 			command.add("--proxy");
@@ -63,72 +47,118 @@ public class YtDlpUtil {
 		command.add("--write-thumbnail");
 		command.add("--convert-thumbnails");
 		command.add("webp");
-		// command.add("%(title)s.%(ext)s");
-//		command.add("--restrict-filenames");
 		command.add("--no-restrict-filenames");
 		command.add("--windows-filenames");
-		
-		command.add("--replace-in-metadata");
-		command.add("title");
-		command.add("#");
-		command.add("_");
-		
-		command.add("--replace-in-metadata");
-		command.add("title");
-		command.add("\\?");
-		command.add("_");
-		
-		command.add("--replace-in-metadata");
-		command.add("title");
-		command.add("\\|");
-		command.add("_");
 
-		if (null != Global.useragent && !"".equals(Global.useragent)) {
+		String[] specialChars = {"#", "\\?", "\\|", "\\<", "\\>", "\\/", "\\\\"};
+
+		for (String charToReplace : specialChars) {
+		    command.add("--replace-in-metadata");
+		    command.add("title");
+		    command.add(charToReplace);
+		    command.add("_");
+		}
+		
+		
+		if (Global.useragent != null && !Global.useragent.trim().isEmpty()) {
 			command.add("--user-agent");
 			command.add(Global.useragent);
 		}
-//		if (Global.ytdlpargs != null && !Global.ytdlpargs.isEmpty()) {
-//		    String[] args = Global.ytdlpargs.split(" ");
-//		    command.addAll(Arrays.asList(args));
-//		}
+		logger.info("执行yt-dlp下载命令: {}", String.join(" ", command));
 		ProcessBuilder processBuilder = new ProcessBuilder(command);
-	    Process process = processBuilder.start();
-	    
+		processBuilder.redirectErrorStream(true);
+		Process process = processBuilder.start();
+		StringBuilder stringBuilder = new StringBuilder();
+		Thread progressThread = null;
+		try (BufferedReader reader = new BufferedReader(
+				new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+			progressThread = new Thread(() -> {
+				try {
+					while (!Thread.currentThread().isInterrupted()) {
+						Thread.sleep(5000);
+						logger.info("yt-dlp 下载进行中...");
+					}
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			});
+			progressThread.setName("yt-dlp-progress-" + System.currentTimeMillis());
+			progressThread.setDaemon(true);
+			progressThread.start();
 
-	    Thread stderrThread = new Thread(() -> {
-	        try (BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-	            String errLine;
-	            while ((errLine = errReader.readLine()) != null) {
-	                logger.warn("yt-dlp stderr: " + errLine);
-	            }
-	        } catch (IOException e) {
-	            logger.error("yt-dlp 错误输出失败", e);
-	        }
-	    });
-	    stderrThread.start();
-	    
-	    
-	    StringBuilder stringBuilder = new StringBuilder();
-	    try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-	        String line;
-	        while ((line = reader.readLine()) != null) {
-	            stringBuilder.append(line).append("\n");
-	        }
-	    } finally {
-	        process.waitFor();
-	        stderrThread.join();
-	        process.destroy();
-	    }
+			String line;
+			while ((line = reader.readLine()) != null) {
+				if (line.contains("[download]") && line.contains("%")) {
+					logger.info("yt-dlp 下载进度: {}", line.trim());
+				} else if (line.startsWith("{")) {
+					stringBuilder.append(line).append("\n");
+				} else if (line.contains("[Merger]") || line.contains("[VideoConvertor]")) {
+					logger.info("yt-dlp 处理: {}", line.trim());
+				} else if (line.contains("ERROR") || line.contains("error")) {
+					logger.error("yt-dlp 错误: {}", line.trim());
+				}
+			}
+		} finally {
+			if (progressThread != null) {
+				progressThread.interrupt();
+			}
+		}
 
-	    String completeString = stringBuilder.toString();
-	    if (process.exitValue() != 0) {
-	        logger.error(completeString);
-	    } else {
-	        logger.info("yt-dlp executed with exit code: " + process.exitValue());
-	    }
-	    return completeString;
+		int exitCode = process.waitFor();
+		String completeString = stringBuilder.toString();
+
+		if (exitCode != 0) {
+			logger.error("yt-dlp执行失败，退出码: {}, 输出: {}", exitCode, completeString);
+			throw new RuntimeException("yt-dlp执行失败，退出码: " + exitCode);
+		}
+
+		logger.info("yt-dlp执行成功，退出码: {}", exitCode);
+		return completeString;
 	}
 
+	
+	/**
+	 * 添加Cookie配置到命令中
+	 * 
+	 * @param command  命令列表
+	 * @param platform 平台类型
+	 */
+	private static void addCookieConfig(List<String> command, String platform) {
+		if (platform == null) {
+			return;
+		}
+
+		String apppath = Global.apppath;
+		if (apppath == null || apppath.trim().isEmpty()) {
+			logger.warn("应用路径未配置，跳过Cookie设置");
+			return;
+		}
+
+		File cookieDir = new File(apppath, "cookies");
+		if (!cookieDir.exists()) {
+			logger.debug("Cookie目录不存在: {}", cookieDir.getAbsolutePath());
+			return;
+		}
+
+		File cookieFile;
+		switch (platform.toLowerCase()) {
+			case "youtube":
+				cookieFile = new File(cookieDir, "youtube.txt");
+				break;
+			case "twitter":
+				cookieFile = new File(cookieDir, "twitter.txt");
+				break;
+			default:
+				cookieFile = new File(cookieDir, platform + ".txt");
+				break;
+		}
+
+		if (cookieFile.exists()) {
+			command.add("--cookies");
+			command.add(cookieFile.getAbsolutePath());
+		}
+	}
+	
 	public static boolean isVideoStream(JSONObject format) {
 		String vcodec = format.getString("vcodec");
 		return vcodec != null && !"none".equals(vcodec);
@@ -258,36 +288,7 @@ public class YtDlpUtil {
 		command.add("-f");
 		command.add("bestvideo+bestaudio/best");
 		
-		String apppath = Global.apppath;
-		File cookieDir = new File(apppath + "/cookies");
-		
-		// 根据平台加载 cookie
-		if (null != platform && platform.equals("youtube")) {
-			File youtubeFile = new File(cookieDir, "youtube.txt");
-			if (youtubeFile.exists()) {
-				command.add("--cookies");
-				command.add(youtubeFile.getAbsolutePath());
-				logger.info("已加载 YouTube cookie 文件");
-			}
-		}
-
-		if (null != platform && (platform.equals("twitter") || platform.toLowerCase().contains("twitter"))) {
-			File twitterFile = new File(cookieDir, "twitter.txt");
-			if (twitterFile.exists()) {
-				command.add("--cookies");
-				command.add(twitterFile.getAbsolutePath());
-				logger.info("已加载 Twitter cookie 文件");
-			}
-		}
-		
-		if (null != platform && !platform.equals("twitter") && !platform.equals("youtube") && !platform.toLowerCase().contains("twitter")) {
-			File all = new File(cookieDir, platform + ".txt");
-			if (all.exists()) {
-				command.add("--cookies");
-				command.add(all.getAbsolutePath());
-				logger.info("已加载 {} cookie 文件", platform);
-			}
-		}
+		addCookieConfig(command, platform);
 
 		if (Global.proxyinfo != null && !Global.proxyinfo.trim().isEmpty()) {
 			command.add("--proxy");
