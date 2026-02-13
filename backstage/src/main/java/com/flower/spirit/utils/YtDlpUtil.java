@@ -288,36 +288,7 @@ public class YtDlpUtil {
 		command.add("-f");
 		command.add("bestvideo+bestaudio/best");
 		
-		String apppath = Global.apppath;
-		File cookieDir = new File(apppath + "/cookies");
-		
-		// 根据平台加载 cookie
-		if (null != platform && platform.equals("youtube")) {
-			File youtubeFile = new File(cookieDir, "youtube.txt");
-			if (youtubeFile.exists()) {
-				command.add("--cookies");
-				command.add(youtubeFile.getAbsolutePath());
-				logger.info("已加载 YouTube cookie 文件");
-			}
-		}
-
-		if (null != platform && (platform.equals("twitter") || platform.toLowerCase().contains("twitter"))) {
-			File twitterFile = new File(cookieDir, "twitter.txt");
-			if (twitterFile.exists()) {
-				command.add("--cookies");
-				command.add(twitterFile.getAbsolutePath());
-				logger.info("已加载 Twitter cookie 文件");
-			}
-		}
-		
-		if (null != platform && !platform.equals("twitter") && !platform.equals("youtube") && !platform.toLowerCase().contains("twitter")) {
-			File all = new File(cookieDir, platform + ".txt");
-			if (all.exists()) {
-				command.add("--cookies");
-				command.add(all.getAbsolutePath());
-				logger.info("已加载 {} cookie 文件", platform);
-			}
-		}
+		addCookieConfig(command, platform);
 
 		if (Global.proxyinfo != null && !Global.proxyinfo.trim().isEmpty()) {
 			command.add("--proxy");
