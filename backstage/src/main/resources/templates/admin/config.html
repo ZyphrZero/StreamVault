@@ -626,6 +626,7 @@
               option['rangenum'] = $("#rangenum").val();
               option['frontend'] = $("#frontend").val();
               option['danmudown'] = $("#danmudown").val();
+              option['hiddenplatforms'] = $("#hiddenplatforms").val();
               $.post("/admin/api/saveConfig",option,function(data,status){
                   if(data.resCode =="000001"){
                       layer.closeAll();

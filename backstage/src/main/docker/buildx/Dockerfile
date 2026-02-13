@@ -32,6 +32,8 @@ RUN wget -O /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/down
 ENV YT_DLP_PATH=/usr/local/bin/yt-dlp
 
 
+COPY --from=denoland/deno:bin-2.6.9 /deno /usr/local/bin/deno
+
 # 准备目录结构
 VOLUME ["/tmp", "/app"]
 COPY db /home/app/db/
