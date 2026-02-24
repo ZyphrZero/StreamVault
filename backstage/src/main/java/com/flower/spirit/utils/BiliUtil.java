@@ -8,6 +8,7 @@ import java.security.PublicKey;
 import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -80,7 +81,7 @@ public class BiliUtil {
 	 */
 	public static Map<String, String> findVideoStreamingNoData(Map<String, String> videoDataInfo, String token,
 			String quality, String namepath) throws Exception {
-		String api = buildInterfaceAddress(videoDataInfo.get("aid"), videoDataInfo.get("cid"), token, quality);
+		String api = buildInterfaceWbiAddress(videoDataInfo.get("aid"), videoDataInfo.get("cid"), token, quality);
 		String httpGetBili = HttpUtil.httpGetBili(api, "UTF-8", token);
 		JSONObject parseObject = JSONObject.parseObject(httpGetBili);
 	    int code = parseObject.getIntValue("code");
@@ -93,16 +94,17 @@ public class BiliUtil {
 			Map<String, String> processing = processing(parseObject, videoDataInfo, filename, namepath);
 			return processing;
 		}
-		String video = parseObject.getJSONObject("data").getJSONArray("durl").getJSONObject(0).getString("url");
+//		String video = parseObject.getJSONObject("data").getJSONArray("durl").getJSONObject(0).getString("url");
+		List<String> choiceMediaAddr = choiceMediaAddr(parseObject.getJSONObject("data").getJSONArray("durl"), 0, false, true);
 		if (Global.downtype.equals("http")) {
-			HttpUtil.downBiliFromUrl(video, filename + ".mp4",
+			HttpUtil.downBiliFromUrl(choiceMediaAddr, filename + ".mp4",
 					FileUtil.generateDir(true, Global.platform.bilibili.name(), false, filename, namepath, null));
 		}
 		if (Global.downtype.equals("a2")) {
 
 			Aria2Util.sendMessage(Global.a2_link,
 					Aria2Util.createBiliparameter(
-							video,
+							choiceMediaAddr.get(0),
 							FileUtil.generateDir(Global.down_path, Global.platform.bilibili.name(), false, filename,
 									namepath, null),
 							filename + ".mp4",
@@ -157,7 +159,8 @@ public class BiliUtil {
 				String filename = StringUtil.getFileName(title, cid);
 
 				// 构建API请求地址
-				String apiUrl = buildInterfaceAddress(aid, cid, token, quality);
+//				String apiUrl = buildInterfaceAddress(aid, cid, token, quality);
+				String apiUrl = buildInterfaceWbiAddress(aid, cid, token, quality);
 
 				// 请求视频源信息
 				String response = HttpUtil.httpGetBili(apiUrl, "UTF-8", token);
@@ -220,8 +223,8 @@ public class BiliUtil {
 	private static Map<String, String> processNormalVideo(JSONObject videoData, Map<String, String> videoInfo,
 			String filename) throws Exception {
 		// 获取视频直链
-		String videoUrl = videoData.getJSONObject("data").getJSONArray("durl").getJSONObject(0).getString("url");
-
+//		String videoUrl = videoData.getJSONObject("data").getJSONArray("durl").getJSONObject(0).getString("url");
+		List<String> videoUrl = choiceMediaAddr(videoData.getJSONObject("data").getJSONArray("durl"), 0, false, true);
 		// 根据下载类型选择下载方式
 		if (Global.downtype.equals("http")) {
 			// 使用HTTP直接下载
@@ -233,7 +236,7 @@ public class BiliUtil {
 					null, null);
 			Aria2Util.sendMessage(
 					Global.a2_link,
-					Aria2Util.createBiliparameter(videoUrl, targetDir, filename + ".mp4", Global.a2_token));
+					Aria2Util.createBiliparameter(videoUrl.get(0), targetDir, filename + ".mp4", Global.a2_token));
 		}
 
 		// 更新视频信息
@@ -257,16 +260,16 @@ public class BiliUtil {
 			String fav)
 			throws Exception {
 		// 获取音视频流URL
-//		System.out.println(videoData);
 		JSONObject dashData = videoData.getJSONObject("data").getJSONObject("dash");
-		String videoUrl = dashData.getJSONArray("video").getJSONObject(0).getString("base_url");
-		String audioUrl = dashData.getJSONArray("audio").getJSONObject(0).getString("base_url");
-
+//		String videoUrl = dashData.getJSONArray("video").getJSONObject(0).getString("base_url");
+//		String audioUrl = dashData.getJSONArray("audio").getJSONObject(0).getString("base_url");
+		List<String> videoList = choiceMediaAddr(dashData.getJSONArray("video"), 0, true, true); 
+		List<String> audioUrl = choiceMediaAddr(dashData.getJSONArray("audio"), 0, true, true); 
 		// 根据下载类型处理
 		if (Global.downtype.equals("http")) {
-			processHttpDownload(videoUrl, audioUrl, filename, fav);
+			processHttpDownload(videoList, audioUrl, filename, fav);
 		} else if (Global.downtype.equals("a2")) {
-			processAria2Download(videoUrl, audioUrl, videoInfo, filename, fav);
+			processAria2Download(videoList.get(0), audioUrl.get(0), videoInfo, filename, fav);
 		}
 
 		// 更新视频信息
@@ -284,7 +287,7 @@ public class BiliUtil {
 	/**
 	 * 使用HTTP方式下载并处理DASH格式视频
 	 */
-	private static void processHttpDownload(String videoUrl, String audioUrl, String filename, String fav)
+	private static void processHttpDownload(List<String> videoUrl, List<String> audioUrl, String filename, String fav)
 			throws Exception {
 		// 创建临时目录
 		String tempDir = FileUtil.generateDir(true, Global.platform.bilibili.name(), true, filename, null, null);
@@ -550,6 +553,8 @@ public class BiliUtil {
 				break;
 		}
 		TreeMap<String, Object> params = new TreeMap<>();
+		params.put("avid", aid);
+		params.put("cid", cid);
 		params.put("qn", qn);
 		params.put("fnver", fnver);
 		params.put("fourk", fourk);
@@ -970,44 +975,60 @@ public class BiliUtil {
     }
     
 
-    public  String choiceMediaAddr(JSONArray data,int mediatype,boolean isdash,boolean cdnsort) {
+    /**传入的是地址数组
+     * @param data
+     * @param mediatype
+     * @param isdash
+     * @param cdnsort
+     * @return
+     */
+    public static List<String>  choiceMediaAddr(JSONArray data,int mediatype,boolean isdash,boolean cdnsort) {
 		if (!cdnsort) {
 			if (isdash) {
 				JSONObject mediaItem = data.getJSONObject(0);
-				return mediaItem.getString("base_url");
+				return Arrays.asList(mediaItem.getString("base_url"));
 			} else {
 				JSONObject durlItem = data.getJSONObject(0);
-				return durlItem.getString("url");
+				return Arrays.asList(durlItem.getString("url"));
 			}
 		}
 		
+		List<String> urls = new ArrayList<>();
+		
 		if (isdash) {
-			JSONObject mediaItem = data.getJSONObject(0);
-			String baseUrl = mediaItem.getString("base_url");
-			List<String> urls = new ArrayList<>();
-			urls.add(baseUrl);
-			
-			if (mediaItem.containsKey("backup_url")) {
-				JSONArray backupUrls = mediaItem.getJSONArray("backup_url");
-				for (int i = 0; i < backupUrls.size(); i++) {
-					urls.add(backupUrls.getString(i));
+			for (int i = 0; i < data.size(); i++) {
+				JSONObject mediaItem = data.getJSONObject(i);
+				urls.add(mediaItem.getString("base_url"));
+				if (mediaItem.containsKey("backup_url")) {
+					JSONArray backupUrls = mediaItem.getJSONArray("backup_url");
+					for (int j = 0; j < backupUrls.size(); j++) {
+						urls.add(backupUrls.getString(j));
+					}
 				}
 			}
-			
-			urls.sort((u1, u2) -> {
-				int priority1 = getCdnPriority(u1);
-				int priority2 = getCdnPriority(u2);
-				return Integer.compare(priority1, priority2);
-			});
-			
-			return urls.get(0);
 		} else {
-			JSONObject durlItem = data.getJSONObject(0);
-			return durlItem.getString("url");
+			for (int i = 0; i < data.size(); i++) {
+				JSONObject durlItem = data.getJSONObject(i);
+				urls.add(durlItem.getString("url"));
+				if (durlItem.containsKey("backup_url")) {
+					JSONArray backupUrls = durlItem.getJSONArray("backup_url");
+					for (int j = 0; j < backupUrls.size(); j++) {
+						urls.add(backupUrls.getString(j));
+					}
+				}
+			}
 		}
+		
+		urls.sort((u1, u2) -> {
+			int priority1 = getCdnPriority(u1);
+			int priority2 = getCdnPriority(u2);
+			return Integer.compare(priority1, priority2);
+		});
+		
+		return urls;
 	}
 	
-	private int getCdnPriority(String url) {
+	private static int getCdnPriority(String url) {
 		if (url.contains("upos-")) {
 			return 0;
 		} else if (url.contains("cn-")) {

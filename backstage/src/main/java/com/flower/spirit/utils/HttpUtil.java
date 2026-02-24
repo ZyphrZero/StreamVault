@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -569,6 +570,27 @@ public class HttpUtil {
         return response;
     }
 
+    public static String downBiliFromUrl(List<String> url, String fileName, String savePath) {
+    	for(int i=0;i<=url.size();i++) {
+    		logger.info("正在使用节点"+i+"进行下载");
+    		try {
+    			String downBiliFromUrl = downBiliFromUrl(url.get(i), fileName, savePath,null);
+    			if(null != downBiliFromUrl && downBiliFromUrl.equals("0")) {
+    				logger.info("使用节点"+i+"下载成功");
+    				return "0";
+    			}else {
+    				logger.info("节点"+i+"下载失败,正在使用下一个节点");
+    			}
+			} catch (Exception e) {
+				logger.info("节点"+i+"下载失败,正在使用下一个节点");
+			}
+    	}
+    	logger.info("所有节点均下载失败");
+		return "1";
+
+    }
+    
+    
     public static String downBiliFromUrl(String urlStr, String fileName, String savePath) throws Exception {
         return downBiliFromUrl(urlStr, fileName, savePath, null);
     }
